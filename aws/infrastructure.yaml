@@ -1,0 +1,278 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  APP:
+    Type: String
+  AppROLE:
+    Type: String
+    Default: "app"
+  ENV:
+    Type: String
+
+  UAI:
+    Type: String
+  InstanceType:
+    Type: String
+  CertificateArn:
+    Type: String
+    
+  Scale:
+    Type: String
+
+  Schedule:
+    Type: String
+    Default: ""
+  StartInstanceCron:
+    Type: String
+    Default: ""
+  StopInstanceCron:
+    Type: String
+    Default: ""
+
+  UpdateParameter:
+    Type: String
+    Default: "27-10-2021"
+          
+Resources:
+
+  VPCLookupUtil:
+    Type: Custom::VPCLookup
+    Properties:
+      ServiceToken: !Join
+        - ':'
+        - - 'arn:aws:lambda'
+          - !Ref AWS::Region
+          - !Ref AWS::AccountId
+          - 'BHCHelperLambdaUtilities'
+      method: vpc_lookup
+
+  SecurityGroupApp:
+    Type: "AWS::ServiceCatalog::CloudFormationProvisionedProduct"
+    Properties:
+     ProductName: "CustomSG"
+     ProvisioningArtifactName: "{{resolve:ssm:/ServiceCatalog/CustomSG/LatestVersion:1}}"
+     ProvisioningParameters:
+      - Key: "app"
+        Value: !Ref APP
+      - Key: "uai"
+        Value: !Ref UAI
+      - Key: "env"
+        Value: !Ref ENV
+      - Key: "role"
+        Value: !Ref AppROLE
+      - Key: "SGName"
+        Value: !Ref APP
+      - Key: "UpdateParameter"
+        Value: !Ref UpdateParameter
+        
+  IngressRuleCustomSGApp443:
+    Type: "AWS::ServiceCatalog::CloudFormationProvisionedProduct"
+    DependsOn: SecurityGroupApp
+    Properties:
+     ProductName: "IngressRuleCustomSG"
+     ProvisioningArtifactName: "{{resolve:ssm:/ServiceCatalog/IngressRuleCustomSG/LatestVersion:1}}"
+     ProvisioningParameters:
+      - Key: "CustomSGId"
+        Value: !GetAtt SecurityGroupApp.Outputs.SecurityGroupId
+      - Key: "IngressIpProtocol"
+        Value: "tcp"
+      - Key: "FromPortIngress"
+        Value: "443"
+      - Key: "ToPortIngress"
+        Value: "443"
+      - Key: "IngressCidr"
+        Value: "10.0.0.0/8"
+      - Key: "InSourceSecurityGroupId"
+        Value: ""
+      - Key: "UpdateParameter"
+        Value: !Ref UpdateParameter
+        
+  IngressRuleCustomSGApp80:
+    Type: "AWS::ServiceCatalog::CloudFormationProvisionedProduct"
+    DependsOn: SecurityGroupApp
+    Properties:
+     ProductName: "IngressRuleCustomSG"
+     ProvisioningArtifactName: "{{resolve:ssm:/ServiceCatalog/IngressRuleCustomSG/LatestVersion:1}}"
+     ProvisioningParameters:
+      - Key: "CustomSGId"
+        Value: !GetAtt SecurityGroupApp.Outputs.SecurityGroupId
+      - Key: "IngressIpProtocol"
+        Value: "tcp"
+      - Key: "FromPortIngress"
+        Value: "80"
+      - Key: "ToPortIngress"
+        Value: "80"
+      - Key: "IngressCidr"
+        Value: "10.0.0.0/8"
+      - Key: "InSourceSecurityGroupId"
+        Value: ""
+      - Key: "UpdateParameter"
+        Value: !Ref UpdateParameter
+        
+  IngressRuleCustomSGAppECS:
+    Type: "AWS::ServiceCatalog::CloudFormationProvisionedProduct"
+    DependsOn: SecurityGroupApp
+    Properties:
+     ProductName: "IngressRuleCustomSG"
+     ProvisioningArtifactName: "{{resolve:ssm:/ServiceCatalog/IngressRuleCustomSG/LatestVersion:1}}"
+     ProvisioningParameters:
+      - Key: "CustomSGId"
+        Value: !GetAtt SecurityGroupApp.Outputs.SecurityGroupId
+      - Key: "IngressIpProtocol"
+        Value: "tcp"
+      - Key: "FromPortIngress"
+        Value: "32768"
+      - Key: "ToPortIngress"
+        Value: "61000"
+      - Key: "IngressCidr"
+        Value: !GetAtt VPCLookupUtil.VPCCidr
+      - Key: "InSourceSecurityGroupId"
+        Value: ""
+      - Key: "UpdateParameter"
+        Value: !Ref UpdateParameter
+        
+  ECSApp:
+    Type: "AWS::ServiceCatalog::CloudFormationProvisionedProduct"
+    DependsOn: SecurityGroupApp
+    Properties:
+     ProductName: "ECS-Cluster"
+     ProvisioningArtifactName: "{{resolve:ssm:/ServiceCatalog/ECS-Cluster/LatestVersion:1}}"
+     ProvisioningParameters:
+      - Key: "ClusterName"
+        Value: !Ref APP
+      - Key: "AppName"
+        Value: !Ref APP
+      - Key: "UAI"
+        Value: !Ref UAI
+      - Key: "Env"
+        Value: !Ref ENV
+      - Key: "LaunchType"
+        Value: "EC2"
+      - Key: "WorkerType"
+        Value: !Ref InstanceType
+      - Key: "ALBSecurityGrp"
+        Value: !GetAtt SecurityGroupApp.Outputs.SecurityGroupId
+      - Key: "scalingpolicy"
+        Value: "false"
+      - Key: "CreateALB"
+        Value: "no"
+      - Key: "MinServers"
+        Value: !Ref Scale
+      - Key: "MaxServers"
+        Value: !Ref Scale
+      - Key: "DesiredCapacity"
+        Value: !Ref Scale
+      - Key: "Schedule"
+        Value: !Ref Schedule
+      - Key: "StartInstanceCron"
+        Value: !Ref StartInstanceCron
+      - Key: "StopInstanceCron"
+        Value: !Ref StopInstanceCron
+      - Key: "UpdateParameter"
+        Value: !Ref UpdateParameter
+        
+  TargetGroupApp:
+    Type: "AWS::ServiceCatalog::CloudFormationProvisionedProduct"
+    Properties:
+     ProductName: "alb-targetgroup"
+     ProvisioningArtifactName: "{{resolve:ssm:/ServiceCatalog/alb-targetgroup/LatestVersion:1}}"
+     ProvisioningParameters: 
+      - Key: "app"
+        Value: !Ref APP
+      - Key: "uai"
+        Value: !Ref UAI
+      - Key: "env"
+        Value: !Ref ENV
+      - Key: "role"
+        Value: !Ref AppROLE
+      - Key: "TGName"
+        Value: !Join ['-', [!Ref APP , 'TG']]
+      - Key: "TGProtocol"
+        Value: "HTTP"
+      - Key: "TGPort"
+        Value: "80"
+      - Key: "SlowStartMode"
+        Value: "60"
+      - Key: "HealthCheckProtocol"
+        Value: "HTTP"
+      - Key: "HealthCheckPort"
+        Value: ""
+      - Key: "HealthCheckPath"
+        Value: "/"
+      - Key: "SuccessCodes"
+        Value: "200,401"
+      - Key: "UpdateParameter"
+        Value: !Ref UpdateParameter
+        
+  LoadBalancerApp:
+    Type: "AWS::ServiceCatalog::CloudFormationProvisionedProduct"
+    DependsOn:
+      - SecurityGroupApp
+      - TargetGroupApp
+    Properties:
+     ProductName: "ALB"
+     ProvisioningArtifactName: "{{resolve:ssm:/ServiceCatalog/ALB/LatestVersion:1}}"
+     ProvisioningParameters:
+      - Key: "app"
+        Value: !Ref APP
+      - Key: "uai"
+        Value: !Ref UAI
+      - Key: "env"
+        Value: !Ref ENV
+      - Key: "role"
+        Value: !Ref AppROLE
+      - Key: "ALBName"
+        Value: !Ref APP
+      - Key: "ListenerProtocol"
+        Value: "HTTPS"
+      - Key: "ListenerPort"
+        Value: "443"
+      - Key: "CertificateArn"
+        Value: !Ref CertificateArn
+      - Key: "SecurityGroupId"
+        Value: !GetAtt SecurityGroupApp.Outputs.SecurityGroupId
+      - Key: "TargetGroupArn"
+        Value: !GetAtt TargetGroupApp.Outputs.TgArn
+      - Key: "UpdateParameter"
+        Value: !Ref UpdateParameter
+        
+  ListenerApp80:
+    Type: "AWS::ServiceCatalog::CloudFormationProvisionedProduct"
+    DependsOn:
+      - LoadBalancerApp
+    Properties:
+     ProductName: "ALB-listener"
+     ProvisioningArtifactName: "{{resolve:ssm:/ServiceCatalog/ALB-listener/LatestVersion:1}}"
+     ProvisioningParameters:
+      - Key: "ListenerProtocol"
+        Value: "HTTP"
+      - Key: "ListenerPort"
+        Value: "80"
+      - Key: "ApplicationLoadBalancerArn"
+        Value: !GetAtt LoadBalancerApp.Outputs.AlbArn
+      - Key: "DefaultActionType"
+        Value: "redirect"
+      - Key: "TargetGroupArn"
+        Value: !GetAtt TargetGroupApp.Outputs.TgArn
+      - Key: "RedirectHost"
+        Value: "#{host}"
+      - Key: "RedirectPath"
+        Value: "/#{path}"
+      - Key: "RedirectQuery"
+        Value: "#{query}"
+      - Key: "UpdateParameter"
+        Value: !Ref UpdateParameter
+        
+  InternalRoute53App:
+    Type: "AWS::ServiceCatalog::CloudFormationProvisionedProduct"
+    DependsOn: LoadBalancerApp
+    Properties:
+     ProductName: "InternalRoute53CNAME"
+     ProvisioningArtifactName: "{{resolve:ssm:/ServiceCatalog/InternalRoute53CNAME/LatestVersion:1}}"
+     ProvisioningParameters:
+      - Key: "SubdomainName"
+        Value: !Join ['-', [!Ref APP, !Ref ENV]]
+      - Key: "DNSNameToCname"
+        Value: !GetAtt LoadBalancerApp.Outputs.AlbDns
+      - Key: "UpdateParameter"
+        Value: !Ref UpdateParameter
